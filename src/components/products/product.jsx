@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Table, Button, Modal, Form, Row, Col, Alert } from 'react-bootstrap';
-import axios from "axios";
+import ErrorModal from '../error/error.jsx'
 
 function Product() {
+
+    const graphqlServerUrl = 'https://microservices-products.azurewebsites.net/graphql'; // change this to your GraphQL server url
 
     const [edit, setEdit] = useState(false);
     const [show, setShow] = useState(false);
@@ -12,75 +14,156 @@ function Product() {
     const [sku, setSku] = useState('');
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
-    const [status, setStatus] = useState('');
+    const [status, setStatus] = useState();
     const [price, setPrice] = useState('');
     const [data, setData] = useState([]);
     const [currentRecord, setCurrentRecord] = useState([]);
-    const [error, setError] = useState('');
+    const [error, setError] = useState(null);
+    const [showErrorModal, setShowErrorModal] = useState(false);
+    const [categoryId, setCategoryId] = useState('');
+    const [categories, setCategories] = useState([]);
+
+    const isValidSKU = (sku) => {
+        const skuPattern = /^SKU.{3}$/;
+        return skuPattern.test(sku);
+    };
 
     const handleShow = () => {
         setEdit(false);
         setShow(true);
     };
 
-    const handleSave = () => {
-        if (!sku || !name || !description || !status || !price) {
-            setError('Todos los campos son obligatorios');
-            return;
-        }
-        const booleanStatus = status === 'Activo' ? true : false;
-        setError('');
+    const handleSave = async () => {
+        try {
+            if (!sku || !name || !description || status === '' || !price || !categoryId) {
+                setError('Todos los campos son obligatorios');
+                return;
+            }
+            if (isNaN(parseFloat(price))) {
+                setError('El precio debe ser un número válido');
+                return;
+            }
+            if (!isValidSKU(sku)) {
+                setError('SKU debe ser de 6 caracteres y empezar con "SKU"');
+                return;
+            }
+            const booleanStatus = status === 'Activo' ? true : false;
 
-        if (edit == true) {
-            axios.put(`http://localhost:8081/api/product/${currentRecord.id}`, {
-                sku: sku,
-                name: name,
-                description: description,
-                status: booleanStatus,
-                price: price,
-            })
-                .then(response => {
-                    const updatedData = data.map(item => item.id === currentRecord.id ? { id: currentRecord.id, sku, name, description, status, price } : item);
+            const inputProduct = { sku, name, description, status: booleanStatus, price: parseFloat(price), categoryId };
+            const inputProductUpdate = { sku, name, description, status: booleanStatus, price: parseFloat(price), categoryId };
+            setError('');
+
+            if (edit == true) {
+                const result = await fetch(graphqlServerUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                        mutation UpdateProduct($productId: String!, $inputProduct: InputProductUpdate!) {
+                            updateProduct(productId: $productId, inputProduct: $inputProduct) {
+                                id
+                                sku
+                                name
+                                description
+                                status
+                                price
+                                category {
+                                    id
+                                    name
+                                }
+                            }
+                        }
+                        `,
+                        variables: {
+                            productId: currentRecord.id,
+                            inputProduct
+                        }
+                    }),
+                });
+
+                const { data: responseData } = await result.json();
+                if (responseData && responseData.updateProduct) {
+                    const updatedData = data.map(item => item.id === currentRecord.id ? { id: currentRecord.id, ...inputProduct } : item);
                     setData(updatedData);
                     setUpdateModal(true);
-                })
-                .catch(error => {
-                    console.error("There was an error updating the record: ", error);
+                }
+            }
+            else {
+                const result = await fetch(graphqlServerUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                        mutation CreateProduct($inputProduct: InputProduct!) {
+                            createProduct(inputProduct: $inputProduct) {
+                                id
+                                sku
+                                name
+                                description
+                                status
+                                price
+                                category {
+                                    id
+                                    name
+                                }
+                            }
+                        }
+                        `,
+                        variables: {
+                            inputProduct
+                        }
+                    }),
                 });
-            setEdit(false);
-        }
-        else {
-            axios.post('http://localhost:8081/api/product', {
-                sku: sku,
-                name: name,
-                description: description,
-                status: booleanStatus,
-                price: price,
-            })
-                .then((response) => {
+
+                const { data } = await result.json();
+                if (data && data.createProduct) {
                     const newProduct = {
-                        id: data.length + 1,
-                        sku: sku,
-                        name: name,
-                        description: description,
-                        status: booleanStatus,
-                        price: price,
+                        id: data.createProduct.id,
+                        ...inputProduct
                     };
                     setData(prevData => [...prevData, newProduct]);
                     setShow(false);
                     setCreateModal(true);
-                })
-                .catch((error) => {
-                    console.error('Error:', error);
-                });
+                }
+            }
+            setShow(false);
+            setEdit(false);
+            setSku('');
+            setName('');
+            setDescription('');
+            setStatus();
+            setPrice('');
+            setCategoryId('')
+        } catch (error) {
+            setError(error.message);
+            setShowErrorModal(true);
         }
-        setShow(false);
-        setEdit(false);
-        setSku('');
-        setName('');
-        setDescription('');
-        setStatus('');
-        setPrice('');
+    };
+
+    const fetchCategories = async () => {
+        const result = await fetch(graphqlServerUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: `
+                query {
+                    findAllCategories {
+                        id
+                        name
+                    }
+                }
+                `,
+            }),
+        });
+
+        const { data } = await result.json();
+        console.log(data);  // Imprimir datos en consola
+
+        if (data && data.findAllCategories) {
+            setCategories(data.findAllCategories);
+            console.log(data);  // Imprimir datos en consola
+
+        }
     };
 
     const handleDeleteConfirmation = (record) => {
@@ -88,16 +171,33 @@ function Product() {
         setDeleteModal(true);
     };
 
-    const handleDelete = (record) => {
-        axios.delete(`http://localhost:8081/api/product/${record.id}`)
-            .then(response => {
+    const handleDelete = async (record) => {
+        try {
+            const result = await fetch(graphqlServerUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: `
+                    mutation DeleteProduct($productId: String!) {
+                        deleteProduct(productId: $productId)
+                    }
+                    `,
+                    variables: {
+                        productId: record.id,
+                    }
+                }),
+            });
+
+            const response = await result.json();
+            if (response.data && response.data.deleteProduct) {
                 const updatedData = data.filter(item => item.id !== record.id);
                 setData(updatedData);
-            })
-            .catch(error => {
-                console.error("Hubo un error al eliminar el registro: ", error);
-            });
-        setDeleteModal(false);
+            }
+            setDeleteModal(false);
+        } catch (error) {
+            setError(error.message);
+            setShowErrorModal(true);
+        }
     };
 
     const handleEdit = (item) => {
@@ -105,7 +205,8 @@ function Product() {
         setSku(item.sku);
         setName(item.name);
         setDescription(item.description);
-        setStatus(item.status);
+        setStatus();
+        setCategoryId('')
         setPrice(item.price);
         setEdit(true);
         setShow(true);
@@ -113,148 +214,210 @@ function Product() {
 
     useEffect(() => {
         const fetchData = async () => {
-            const result = await axios('http://localhost:8081/api/product');
-            setData(result.data);
+            try {
+                const result = await fetch(graphqlServerUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                        query {
+                            findAllProducts {
+                                id
+                                sku
+                                name
+                                description
+                                status
+                                price
+                                category {
+                                    id
+                                    name
+                                }
+                            }
+                        }
+                    `,
+                    }),
+                });
+
+                const { data } = await result.json();
+                if (data && data.findAllProducts) {
+                    setData(data.findAllProducts);
+                }
+            } catch (error) {
+                setError(error.message);
+                setShowErrorModal(true);
+            }
         };
-        fetchData();
+        fetchCategories();
+        try {
+            fetchData();
+        } catch (error) {
+            setError(error.message);
+            setShowErrorModal(true);
+        }
+
     }, []);
 
-    return (
-        <Container>
-            <Row className="justify-content-center">
-                <Col xs={12} md={8} lg={6}>
-                    <h1 className="text-center mt-5" style={{ fontSize: '3em' }}>¡Bienvenidos a nuestros productos!</h1>
-                    <p className="text-center mt-4">
-                        Aquí puedes ver todos nuestros productos.
-                    </p>
-                </Col>
-            </Row>
-            <Row>
-                <Col>
-                    <Table striped bordered hover>
-                        <thead>
-                            <tr>
-                                <th>SKU</th>
-                                <th>Nombre</th>
-                                <th>Descripción</th>
-                                <th>Estado</th>
-                                <th>Precio</th>
-                                <th>Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {data.map(item => (
-                                <tr key={item.id}>
-                                    <td>{item.sku}</td>
-                                    <td>{item.name}</td>
-                                    <td>{item.description}</td>
-                                    <td>{item.status ? 'Activo' : 'Inactivo'}</td>
-                                    <td>{item.price}</td>
-                                    <td>
-                                        <Button  variant="primary" style={{ marginRight: '10px' }} onClick={() => handleEdit(item)}>Editar</Button>
-                                        <Button variant="danger" onClick={() => handleDeleteConfirmation(item)}>Eliminar</Button>
-                                    </td>
+
+    try {
+        return (
+            <Container>
+                <Row className="justify-content-center">
+                    <Col xs={12} md={8} lg={6}>
+                        <h1 className="text-center mt-5" style={{ fontSize: '3em' }}>¡Bienvenidos a nuestros productos!</h1>
+                        <p className="text-center mt-4">
+                            Aquí puedes ver todos nuestros productos.
+                        </p>
+                    </Col>
+                </Row>
+                <Row>
+                    <Col>
+                        <Table striped bordered hover>
+                            <thead>
+                                <tr>
+                                    <th>SKU</th>
+                                    <th>Nombre</th>
+                                    <th>Descripción</th>
+                                    <th>Estado</th>
+                                    <th>Precio</th>
+                                    <th>Acciones</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </Table>
-                </Col>
-            </Row>
-            <Row>
-                <Col><Button variant="primary" onClick={handleShow}>Crear Producto</Button></Col>
-            </Row>
+                            </thead>
+                            <tbody>
+                                {data.map(item => (
+                                    <tr key={item.id}>
+                                        <td>{item.sku}</td>
+                                        <td>{item.name}</td>
+                                        <td>{item.description}</td>
+                                        <td>{item.status ? 'Activo' : 'Inactivo'}</td>
+                                        <td>{item.price}</td>
+                                        <td>
+                                            <Button variant="primary" style={{ marginRight: '10px' }} onClick={() => handleEdit(item)}>Editar</Button>
+                                            <Button variant="danger" onClick={() => handleDeleteConfirmation(item)}>Eliminar</Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </Table>
+                    </Col>
+                </Row>
+                <Row>
+                    <Col><Button variant="primary" onClick={handleShow}>Crear Producto</Button></Col>
+                </Row>
 
-            <Modal show={show} onHide={() => { setShow(false);                        setEdit(false);
-                        setEdit(false);
-                        setSku('');
-                        setName('');
-                        setDescription('');
-                        setStatus('');
-                        setPrice('');}}>
-                <Modal.Header closeButton>
-                    <Modal.Title>{edit ? "Editar Producto" : "Crear Producto"}</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    <Form>
-                        <Form.Group controlId="formBasicSku">
-                            <Form.Label>SKU</Form.Label>
-                            <Form.Control type="text" placeholder="Ingrese SKU" value={sku} onChange={e => setSku(e.target.value)} />
-                        </Form.Group>
-                        <Form.Group controlId="formBasicName">
-                            <Form.Label>Nombre</Form.Label>
-                            <Form.Control type="text" placeholder="Ingrese nombre" value={name} onChange={e => setName(e.target.value)} />
-                        </Form.Group>
-                        <Form.Group controlId="formBasicDescription">
-                            <Form.Label>Descripción</Form.Label>
-                            <Form.Control type="text" placeholder="Ingrese descripción" value={description} onChange={e => setDescription(e.target.value)} />
-                        </Form.Group>
-                        <Form.Group controlId="formBasicStatus">
-                            <Form.Label>Estado</Form.Label>
-                            <Form.Control as="select" value={status} onChange={e => setStatus(e.target.value)}>
-                                <option value="">Seleccione el estado</option>
-                                <option value="Activo">Activo</option>
-                                <option value="Inactivo">Inactivo</option>
-                            </Form.Control>
-                        </Form.Group>
-                        <Form.Group controlId="formBasicPrice">
-                            <Form.Label>Precio</Form.Label>
-                            <Form.Control type="number" placeholder="Ingrese precio" value={price} onChange={e => setPrice(e.target.value)} />
-                        </Form.Group>
-                    </Form>
-                    {error && <Alert variant="danger">{error}</Alert>}
-                </Modal.Body>
-                <Modal.Footer>
-                    <Button variant="secondary" onClick={() => {
-                        setShow(false);
-                        setEdit(false);
-                        setSku('');
-                        setName('');
-                        setDescription('');
-                        setStatus('');
-                        setPrice('');
-                    }}>Cerrar</Button>
-                    <Button variant="primary" onClick={handleSave} disabled={!sku || !name || !description || !status || !price}>{edit ? "Actualizar" : "Crear"}</Button>
-                </Modal.Footer>
-            </Modal>
+                <Modal show={show} onHide={() => {
+                    setShow(false); setEdit(false);
+                    setEdit(false);
+                    setSku('');
+                    setName('');
+                    setDescription('');
+                    setStatus();
+                    setPrice('');
+                    setCategoryId('')
+                }}>
+                    <Modal.Header closeButton>
+                        <Modal.Title>{edit ? "Editar Producto" : "Crear Producto"}</Modal.Title>
+                    </Modal.Header>
+                    <Modal.Body>
+                        <Form>
+                            <Form.Group controlId="formBasicSku">
+                                <Form.Label>SKU</Form.Label>
+                                <Form.Control type="text" placeholder="Ingrese SKU" value={sku} onChange={e => setSku(e.target.value)} />
+                            </Form.Group>
+                            <Form.Group controlId="formBasicName">
+                                <Form.Label>Nombre</Form.Label>
+                                <Form.Control type="text" placeholder="Ingrese nombre" value={name} onChange={e => setName(e.target.value)} />
+                            </Form.Group>
+                            <Form.Group controlId="formBasicDescription">
+                                <Form.Label>Descripción</Form.Label>
+                                <Form.Control type="text" placeholder="Ingrese descripción" value={description} onChange={e => setDescription(e.target.value)} />
+                            </Form.Group>
+                            <Form.Group controlId="formBasicStatus">
+                                <Form.Label>Estado</Form.Label>
+                                <Form.Control as="select" value={status} onChange={e => setStatus(e.target.value)}>
+                                    <option selected value="">Seleccione uno</option>
+                                    <option value={true}>Activo</option>
+                                    <option value={false}>Inactivo</option>
+                                </Form.Control>
+                            </Form.Group>
+                            <Form.Group controlId="formBasicPrice">
+                                <Form.Label>Precio</Form.Label>
+                                <Form.Control type="number" placeholder="Ingrese precio" value={price} onChange={e => setPrice(e.target.value)} />
+                            </Form.Group>
+                            <Form.Group controlId="formBasicCategory">
+                                <Form.Label>Categoría</Form.Label>
+                                <Form.Control as="select" value={categoryId} onChange={e => setCategoryId(e.target.value)}>
+                                    <option selected value="">Seleccione uno</option>
+                                    {categories.map(category => (
+                                        <option key={category.id} value={category.id}>
+                                            {category.name}
+                                        </option>
+                                    ))}
+                                </Form.Control>
+                            </Form.Group>
+                        </Form>
+                        {error && <Alert variant="danger">{error}</Alert>}
+                    </Modal.Body>
+                    <Modal.Footer>
+                        <Button variant="secondary" onClick={() => {
+                            setShow(false);
+                            setEdit(false);
+                            setSku('');
+                            setName('');
+                            setDescription('');
+                            setStatus();
+                            setPrice('');
+                            setCategoryId('')
+                        }}>Cerrar</Button>
+                        <Button variant="primary" onClick={handleSave} disabled={!sku || !name || !description || !status || !price}>{edit ? "Actualizar" : "Crear"}</Button>
+                    </Modal.Footer>
+                </Modal>
 
-            <Modal show={deleteModal} onHide={() => setDeleteModal(false)}>
-                <Modal.Header closeButton>
-                    <Modal.Title>Confirmar eliminación</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    ¿Estás seguro de que quieres eliminar este elemento?
-                </Modal.Body>
-                <Modal.Footer>
-                    <Button variant="secondary" onClick={() => setDeleteModal(false)}>Cancelar</Button>
-                    <Button variant="danger" onClick={() => handleDelete(currentRecord)}>Eliminar</Button>
-                </Modal.Footer>
-            </Modal>
+                <Modal show={deleteModal} onHide={() => setDeleteModal(false)}>
+                    <Modal.Header closeButton>
+                        <Modal.Title>Confirmar eliminación</Modal.Title>
+                    </Modal.Header>
+                    <Modal.Body>
+                        ¿Estás seguro de que quieres eliminar este elemento?
+                    </Modal.Body>
+                    <Modal.Footer>
+                        <Button variant="secondary" onClick={() => setDeleteModal(false)}>Cancelar</Button>
+                        <Button variant="danger" onClick={() => handleDelete(currentRecord)}>Eliminar</Button>
+                    </Modal.Footer>
+                </Modal>
 
-            <Modal show={updateModal} onHide={() => setUpdateModal(false)}>
-                <Modal.Header closeButton>
-                    <Modal.Title>Actualización exitosa</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    ¡El producto ha sido actualizado exitosamente!
-                </Modal.Body>
-                <Modal.Footer>
-                    <Button variant="success" onClick={() => setUpdateModal(false)}>OK</Button>
-                </Modal.Footer>
-            </Modal>
+                <Modal show={updateModal} onHide={() => setUpdateModal(false)}>
+                    <Modal.Header closeButton>
+                        <Modal.Title>Actualización exitosa</Modal.Title>
+                    </Modal.Header>
+                    <Modal.Body>
+                        ¡El producto ha sido actualizado exitosamente!
+                    </Modal.Body>
+                    <Modal.Footer>
+                        <Button variant="success" onClick={() => setUpdateModal(false)}>OK</Button>
+                    </Modal.Footer>
+                </Modal>
 
-            <Modal show={createModal} onHide={() => setCreateModal(false)}>
-                <Modal.Header closeButton>
-                    <Modal.Title>Creación exitosa</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    ¡El producto ha sido creado exitosamente!
-                </Modal.Body>
-                <Modal.Footer>
-                    <Button variant="success" onClick={() => setCreateModal(false)}>OK</Button>
-                </Modal.Footer>
-            </Modal>
-        </Container>
-    );
+                <Modal show={createModal} onHide={() => setCreateModal(false)}>
+                    <Modal.Header closeButton>
+                        <Modal.Title>Creación exitosa</Modal.Title>
+                    </Modal.Header>
+                    <Modal.Body>
+                        ¡El producto ha sido creado exitosamente!
+                    </Modal.Body>
+                    <Modal.Footer>
+                        <Button variant="success" onClick={() => setCreateModal(false)}>OK</Button>
+                    </Modal.Footer>
+                </Modal>
+                <ErrorModal show={showErrorModal} onHide={() => setShowErrorModal(false)} error={error} />
+            </Container>
+        );
+    } catch (error) {
+        setError(error.message);
+        setShowErrorModal(true);
+        return (
+            <ErrorModal show={showErrorModal} onHide={() => setShowErrorModal(false)} error={error} />
+        );
+    }
 }
 
 export default Product;
