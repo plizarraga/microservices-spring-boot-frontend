@@ -21,10 +21,3 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Exclude environment-specific .env files
-.env.production
-.env.development
-
-# Keep the .env.example file in version control
-!.env.example
