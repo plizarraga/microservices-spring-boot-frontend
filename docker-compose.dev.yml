@@ -3,6 +3,8 @@ version: '3.9'
 services:
   frontend:
     container_name: frontend
-    build: .
+    build:
+      context: .
+      dockerfile: dockerfile.dev
     ports:
       - '8080:80'
