@@ -1,0 +1,51 @@
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+
+name: Build and deploy container app to Azure Web App - microservices-frontend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: 'ubuntu-latest'
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to registry
+      uses: docker/login-action@v2
+      with:
+        registry: https://containerpedlizar.azurecr.io/
+        username: ${{ secrets.AzureAppService_ContainerUsername_fc9e2d9237b146efaa6e454be01946c1 }}
+        password: ${{ secrets.AzureAppService_ContainerPassword_4027c2009a074f4c9a5950a778579d73 }}
+
+    - name: Build and push container image to registry
+      uses: docker/build-push-action@v3
+      with:
+        push: true
+        tags: containerpedlizar.azurecr.io/${{ secrets.AzureAppService_ContainerUsername_fc9e2d9237b146efaa6e454be01946c1 }}/microservices-frontend:${{ github.sha }}
+        file: ./Dockerfile
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: 'production'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+
+    steps:
+    - name: Deploy to Azure Web App
+      id: deploy-to-webapp
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: 'microservices-frontend'
+        slot-name: 'production'
+        publish-profile: ${{ secrets.AzureAppService_PublishProfile_f19f379dca524b85ad2f1a399e4cfccc }}
+        images: 'containerpedlizar.azurecr.io/${{ secrets.AzureAppService_ContainerUsername_fc9e2d9237b146efaa6e454be01946c1 }}/microservices-frontend:${{ github.sha }}'
